@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>お弁当配達ルートビルダー</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --car1-color: #dc3545;
+            --car2-color: #007bff;
+            --car3-color: #28a745;
+            --bg-color: #f4f6f9;
+        }
+        * { box-sizing: border-box; font-family: 'Helvetica Neue', Arial, sans-serif; }
+        body { margin: 0; padding: 0; background-color: var(--bg-color); color: #333; height: 100vh; display: flex; flex-direction: column; }
+        
+        header { background: #343a40; color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        header h1 { margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px; }
+        
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        
+        .sidebar { width: 380px; background: white; border-right: 1px solid #dee2e6; border-left: 1px solid #dee2e6; display: flex; flex-direction: column; height: 100%; }
+        .panel-section { padding: 12px; border-bottom: 1px solid #dee2e6; }
+        .panel-section h3 { margin: 0 0 8px 0; font-size: 0.95rem; color: #495057; display: flex; align-items: center; gap: 5px; }
+
+        .json-area { width: 100%; height: 60px; padding: 5px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.75rem; resize: none; font-family: monospace; }
+        .date-input-area { display: flex; gap: 5px; margin-top: 5px; }
+        .date-picker { flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.9rem; font-weight: bold; }
+        
+        .import-status { font-size: 0.75rem; color: #28a745; font-weight: bold; margin-top: 4px; text-align: right; }
+        
+        .tab-container { display: flex; background: #e9ecef; border-bottom: 1px solid #dee2e6; }
+        .tab-btn { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; font-weight: bold; font-size: 0.85rem; color: #6c757d; text-align: center; border-bottom: 3px solid transparent; }
+        .tab-btn.active[data-car="1"] { color: var(--car1-color); border-bottom-color: var(--car1-color); background: white; }
+        .tab-btn.active[data-car="2"] { color: var(--car2-color); border-bottom-color: var(--car2-color); background: white; }
+        .tab-btn.active[data-car="3"] { color: var(--car3-color); border-bottom-color: var(--car3-color); background: white; }
+        .tab-btn.active[data-car="all"] { color: #343a40; border-bottom-color: #343a40; background: white; }
+        
+        .list-scroll-area { flex: 1; overflow-y: auto; padding: 10px; background: #f8f9fa; }
+        .delivery-item { background: white; border-radius: 6px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 5px solid #ced4da; position: relative; }
+        .delivery-item.car-1 { border-left-color: var(--car1-color); }
+        .delivery-item.car-2 { border-left-color: var(--car2-color); }
+        .delivery-item.car-3 { border-left-color: var(--car3-color); }
+        
+        .item-header { display: flex; justify-content: space-between; font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; gap: 5px; }
+        .item-time-badge { background: #ffeaa7; color: #d63031; font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .item-address { font-size: 0.8rem; color: #6c757d; margin-bottom: 8px; word-break: break-all; }
+        
+        .car-selector { display: flex; gap: 5px; margin-top: 5px; }
+        .car-btn { flex: 1; padding: 5px; font-size: 0.75rem; border: 1px solid #ced4da; border-radius: 4px; background: white; cursor: pointer; }
+        .car-btn[data-car="1"].active { background: var(--car1-color); color: white; border-color: var(--car1-color); }
+        .car-btn[data-car="2"].active { background: var(--car2-color); color: white; border-color: var(--car2-color); }
+        .car-btn[data-car="3"].active { background: var(--car3-color); color: white; border-color: var(--car3-color); }
+        
+        .order-btn-group { display: flex; gap: 5px; margin-top: 5px; justify-content: flex-end; }
+        .order-btn { padding: 2px 8px; font-size: 0.75rem; background: #e9ecef; border: 1px solid #ced4da; border-radius: 3px; cursor: pointer; }
+
+        .btn-primary { background: #007bff; color: white; border: none; padding: 10px; width: 100%; border-radius: 4px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+        .btn-primary:hover { background: #0056b3; }
+        
+        #map { flex: 1; height: 100%; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🚚 お弁当配達ルートビルダー (マスタースプシ連動版)</h1>
+    <div style="font-size: 0.85rem; color: #ced4da;">基点: 三重県四日市市大字茂福770-1</div>
+</header>
+
+<div class="main-container">
+    <div class="sidebar">
+        <div class="panel-section" style="background: #edf2f7;">
+            <h3>📥 顧客リストにJSONを登録・保存</h3>
+            <textarea id="jsonInputText" class="json-area" placeholder="ここに新しいJSONテキストを貼り付けてください..."></textarea>
+            <button class="btn-primary" onclick="saveJsonToMaster()" style="background: #2b6cb0; font-size: 0.85rem; padding: 6px; margin-top: 3px;">顧客リストへ登録保存する</button>
+        </div>
+
+        <div class="panel-section">
+            <h3>📅 ① 配達日の注文を同期</h3>
+            <div class="date-input-area">
+                <input type="date" id="targetDatePicker" class="date-picker">
+                <button class="btn-primary" onclick="syncOrdersByDate()" style="background: #2c3e50; width: auto; margin-top:0; padding:0 15px; font-size: 0.9rem;">同期</button>
+            </div>
+            <div id="importStatusText" class="import-status">データ読み込み中...</div>
+            
+            <button class="btn-primary" onclick="optimizeRoutes()" style="background: #e67e22; margin-top: 10px; font-size: 0.95rem; padding: 10px;">⏰ おすすめルートを自動計算する</button>
+        </div>
+
+        <div class="tab-container">
+            <button class="tab-btn active" data-car="all" onclick="switchTab('all')">すべて</button>
+            <button class="tab-btn" data-car="1" onclick="switchTab('1')">1号車</button>
+            <button class="tab-btn" data-car="2" onclick="switchTab('2')">2号車</button>
+            <button class="tab-btn" data-car="3" onclick="switchTab('3')">3号車</button>
+        </div>
+
+        <div class="list-scroll-area" id="deliveryListContainer">
+            <p style="text-align: center; color: #6c757d; font-size: 0.85rem; margin-top: 20px;">日付を選択して同期ボタンを押してください</p>
+        </div>
+
+        <div class="panel-section" style="margin-top: auto; background: #fafafa;">
+            <h3>② ドライバーへ共有</h3>
+            <button class="btn-primary" onclick="generateGoogleMapsLinks()" style="background: #28a745;">Googleマップ用ルートURLを作成</button>
+        </div>
+    </div>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const SHOP_LAT = 35.0071582; 
+    const SHOP_LNG = 136.6433357;
+
+    let map;
+    let rawPlaces = []; 
+    let currentFilter = 'all'; 
+    let mapMarkers = [];
+    let routeLines = { '1': null, '2': null, '3': null };
+    const carColors = { '1': '#dc3545', '2': '#007bff', '3': '#28a745' };
+
+    function initMap() {
+        map = L.map('map').setView([SHOP_LAT, SHOP_LNG], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        L.marker([SHOP_LAT, SHOP_LNG], {
+            icon: L.divIcon({
+                className: 'shop-marker',
+                html: `<div style="background:#343a40; color:white; padding:4px 8px; border-radius:4px; font-weight:bold; border:2px solid white;">🏪 富田教室</div>`,
+                iconSize: [80, 30], iconAnchor: [40, 15]
+            })
+        }).addTo(map);
+
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        document.getElementById('targetDatePicker').value = `${yyyy}-${mm}-${dd}`;
+
+        loadDataFromSpreadsheet();
+    }
+
+    // 💾 新機能：JSONデータをマスター用の別スプシに送信・保存する
+    function saveJsonToMaster() {
+        const text = document.getElementById('jsonInputText').value.trim();
+        if(!text) { alert("JSONテキストを入力してください。"); return; }
+        
+        if(!confirm("貼り付けた住所データを顧客リスト（スプレッドシート）へ自動保存しますか？")) return;
+
+        google.script.run.withSuccessHandler(function(result) {
+            if (result.startsWith("SUCCESS")) {
+                alert(result.split(":")[1]);
+                document.getElementById('jsonInputText').value = ""; // 成功したらクリア
+            } else {
+                alert(result);
+            }
+        }).withFailureHandler(function(err) {
+            alert("通信エラー: " + err.message);
+        }).importJsonToMaster(text);
+    }
+
+    function syncOrdersByDate() {
+        const dateVal = document.getElementById('targetDatePicker').value;
+        if(!dateVal) { alert("日付を選択してください。"); return; }
+        
+        document.getElementById('importStatusText').innerText = "注文データを抽出・照合中...";
+        google.script.run.withSuccessHandler(function(status) {
+            if (status.startsWith("SUCCESS")) {
+                alert(status.split(":")[1]);
+                loadDataFromSpreadsheet();
+            } else {
+                alert(status);
+                document.getElementById('importStatusText').innerText = "同期失敗";
+            }
+        }).withFailureHandler(function(err) {
+            alert("通信エラー: " + err.message);
+        }).syncOrdersByDate(dateVal);
+    }
+
+    function loadDataFromSpreadsheet() {
+        google.script.run.withSuccessHandler(function(result) {
+            document.getElementById('importStatusText').innerText = result.lastDate ? "現在の表示: " + result.lastDate : "データなし";
+            rawPlaces = (result.places || []).map(p => {
+                p.lat = parseFloat(p.lat) || 0;
+                p.lng = parseFloat(p.lng) || 0;
+                return p;
+            });
+            refreshUI();
+        }).loadSavedData();
+    }
+
+    function optimizeRoutes() {
+        if (!rawPlaces || rawPlaces.length === 0) { 
+            alert("配達先データがありません。先に「同期」を押してください。"); 
+            return; 
+        }
+
+        try {
+            let sorted = [...rawPlaces].sort((a, b) => {
+                let tA = a.time ? String(a.time).replace(/[^0-9]/g, "") : "9999";
+                let tB = b.time ? String(b.time).replace(/[^0-9]/g, "") : "9999";
+                return parseInt(tA || "9999") - parseInt(tB || "9999");
+            });
+
+            let carBuckets = { '1': [], '2': [], '3': [] };
+            sorted.forEach((place, index) => {
+                let carId = ((index % 3) + 1).toString();
+                carBuckets[carId].push(place);
+            });
+
+            rawPlaces = []; 
+            
+            ['1', '2', '3'].forEach(carId => {
+                let unvisited = carBuckets[carId];
+                let cLat = parseFloat(SHOP_LAT);
+                let cLng = parseFloat(SHOP_LNG);
+                let counter = 1;
+
+                while (unvisited.length > 0) {
+                    let idx = 0;
+                    let minDist = Infinity;
+                    
+                    for (let i = 0; i < unvisited.length; i++) {
+                        let pLat = parseFloat(unvisited[i].lat) || 0;
+                        let pLng = parseFloat(unvisited[i].lng) || 0;
+                        
+                        if (pLat === 0 || pLng === 0) { 
+                            idx = i; 
+                            break; 
+                        }
+                        
+                        let dLat = pLat - cLat;
+                        let dLng = pLng - cLng;
+                        let dist = (dLat * dLat) + (dLng * dLng);
+                        
+                        if (dist < minDist) { 
+                            minDist = dist; 
+                            idx = i; 
+                        }
+                    }
+                    
+                    let nextP = unvisited.splice(idx, 1)[0];
+                    nextP.car = carId;
+                    nextP.order = counter++;
+                    rawPlaces.push(nextP);
+                    
+                    let nextLat = parseFloat(nextP.lat) || 0;
+                    let nextLng = parseFloat(nextP.lng) || 0;
+                    if (nextLat !== 0) { 
+                        cLat = nextLat; 
+                        cLng = nextLng; 
+                    }
+                }
+            });
+
+            refreshUI();
+            
+            google.script.run.withSuccessHandler(function(res){
+                alert("3台へ自動配分・ルート最適化を完了しました！");
+            }).saveDataToSheet(rawPlaces);
+
+        } catch (e) {
+            alert("ルート計算中にエラーが発生しました: " + e.message);
+        }
+    }
+
+    function refreshUI() { renderList(); renderMarkersAndRoutes(); }
+
+    function switchTab(car) {
+        currentFilter = car;
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-car') === car);
+        });
+        renderList();
+    }
+
+    function renderList() {
+        const container = document.getElementById('deliveryListContainer');
+        container.innerHTML = '';
+        let filtered = rawPlaces.filter(p => currentFilter === 'all' ? true : p.car === currentFilter);
+        filtered.sort((a, b) => (parseInt(a.order) || 999) - (parseInt(b.order) || 999));
+
+        if (filtered.length === 0) {
+            container.innerHTML = `<p style="text-align: center; color: #6c757d; font-size: 0.85rem; margin-top: 20px;">該当する配達先がありません</p>`;
+            return;
+        }
+
+        filtered.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = `delivery-item car-${item.car}`;
+            const orderText = item.car !== 'all' ? `[${index + 1}番] ` : '';
+            const displayTime = item.time ? item.time : '指定なし';
+            const timeBadge = `<span class="item-time-badge" title="${item.time}">🕒 ${displayTime}</span>`;
+
+            let isErrorAddr = (parseFloat(item.lat) === 0 || isNaN(parseFloat(item.lat)));
+
+            div.innerHTML = `
+                <div class="item-header">
+                    <span>${orderText}${item.title}</span>
+                    ${timeBadge}
+                </div>
+                <div class="item-address" style="${isErrorAddr ? 'color:red; font-weight:bold;' : ''}">
+                    ${isErrorAddr ? '⚠️マスタ未登録：' + item.address : item.address}
+                </div>
+                <div class="car-selector">
+                    <button class="car-btn ${item.car === '1' ? 'active' : ''}" onclick="assignCar('${item.id}', '1')">1号車</button>
+                    <button class="car-btn ${item.car === '2' ? 'active' : ''}" onclick="assignCar('${item.id}', '2')">2号車</button>
+                    <button class="car-btn ${item.car === '3' ? 'active' : ''}" onclick="assignCar('${item.id}', '3')">3号車</button>
+                </div>
+            `;
+            if (item.car !== 'all') {
+                const orderGroup = document.createElement('div');
+                orderGroup.className = 'order-btn-group';
+                orderGroup.innerHTML = `
+                    <button class="order-btn" onclick="moveOrder('${item.id}', -1)">↑</button>
+                    <button class="order-btn" onclick="moveOrder('${item.id}', 1)">↓</button>
+                `;
+                div.appendChild(orderGroup);
+            }
+            container.appendChild(div);
+        });
+    }
+
+    function renderMarkersAndRoutes() {
+        mapMarkers.forEach(m => map.removeLayer(m));
+        mapMarkers = [];
+        for (let car in routeLines) { if (routeLines[car]) map.removeLayer(routeLines[car]); }
+
+        rawPlaces.forEach(item => {
+            let pLat = parseFloat(item.lat) || 0;
+            let pLng = parseFloat(item.lng) || 0;
+            if(pLat === 0 || pLng === 0) return;
+            
+            let markerColor = '#6c757d';
+            let labelBadge = '？';
+            if (item.car !== 'all') {
+                markerColor = carColors[item.car];
+                const sibs = rawPlaces.filter(p => p.car === item.car).sort((a,b) => (parseInt(a.order) || 999) - (parseInt(b.order) || 999));
+                labelBadge = sibs.findIndex(p => p.id === item.id) + 1;
+            }
+            const marker = L.marker([pLat, pLng], {
+                icon: L.divIcon({
+                    className: 'custom-marker',
+                    html: `<div style="background:${markerColor}; color:white; width:24px; height:24px; border-radius:50%; border:2px solid white; text-align:center; line-height:20px; font-weight:bold; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.3);">${labelBadge}</div>`
+                })
+            }).addTo(map).bindPopup(`<b>${item.title}</b><br><small>${item.address}</small>`);
+            mapMarkers.push(marker);
+        });
+
+        ['1', '2', '3'].forEach(carId => {
+            const carWaypoints = rawPlaces.filter(p => p.car === carId).sort((a, b) => (parseInt(a.order) || 999) - (parseInt(b.order) || 999));
+            if (carWaypoints.length > 0) {
+                const lineCoords = [[SHOP_LAT, SHOP_LNG]];
+                carWaypoints.forEach(p => { 
+                    let pLat = parseFloat(p.lat) || 0;
+                    let pLng = parseFloat(p.lng) || 0;
+                    if(pLat !== 0) lineCoords.push([pLat, pLng]); 
+                });
+                lineCoords.push([SHOP_LAT, SHOP_LNG]);
+                routeLines[carId] = L.polyline(lineCoords, { color: carColors[carId], weight: 4, opacity: 0.8 }).addTo(map);
+            }
+        });
+        
+        const validMarkers = mapMarkers.filter(m => m.getLatLng().lat !== 0);
+        if (validMarkers.length > 0) { map.fitBounds(new L.featureGroup(validMarkers).getBounds().pad(0.1)); }
+    }
+
+    function assignCar(placeId, carId) {
+        const item = rawPlaces.find(p => p.id === placeId);
+        if (!item) return;
+        item.car = carId;
+        if (carId !== 'all') {
+            const maxOrder = rawPlaces.filter(p => p.car === carId).reduce((max, p) => p.order > max && p.order !== 999 ? p.order : max, 0);
+            item.order = maxOrder + 1;
+        } else { item.order = 999; }
+        refreshUI();
+        google.script.run.saveDataToSheet(rawPlaces);
+    }
+
+    function moveOrder(placeId, direction) {
+        const item = rawPlaces.find(p => p.id === placeId);
+        if (!item) return;
+        let sibs = rawPlaces.filter(p => p.car === item.car).sort((a, b) => a.order - b.order);
+        let currIndex = sibs.findIndex(p => p.id === placeId);
+        let targetIndex = currIndex + direction;
+        if (targetIndex >= 0 && targetIndex < sibs.length) {
+            let temp = sibs[currIndex].order;
+            sibs[currIndex].order = sibs[targetIndex].order;
+            sibs[targetIndex].order = temp;
+            sibs.sort((a, b) => a.order - b.order).forEach((p, idx) => p.order = idx + 1);
+            refreshUI();
+            google.script.run.saveDataToSheet(rawPlaces);
+        }
+    }
+
+    function generateGoogleMapsLinks() {
+        let message = "【本日のドライバー別ルートURL】\n\n";
+        let hasData = false;
+        ['1', '2', '3'].forEach(carId => {
+            const carWaypoints = rawPlaces.filter(p => p.car === carId).sort((a, b) => a.order - b.order);
+            if (carWaypoints.length > 0) {
+                hasData = true;
+                let url = "https://www.google.com/maps/dir/" + SHOP_LAT + "," + SHOP_LNG + "/";
+                carWaypoints.forEach(p => { 
+                    let pLat = parseFloat(p.lat) || 0;
+                    let pLng = parseFloat(p.lng) || 0;
+                    if(pLat !== 0) url += pLat + "," + pLng + "/"; 
+                });
+                url += SHOP_LAT + "," + SHOP_LNG + "/";
+                message += "■ " + carId + "号車:\n" + url + "\n\n";
+            }
+        });
+        if (!hasData) { alert("車両が割り当てられていません。"); return; }
+        
+        const output = window.open("", "_blank");
+        output.document.write(`
+            <html><head><title>ルート共有リンク</title></head><body style="padding:20px;font-family:sans-serif;background:#f4f6f9;">
+            <h2>🚚 ドライバー用Googleマップ共有</h2>
+            <pre style="font-size:14px;background:#fff;padding:15px;border:1px solid #ced4da;border-radius:6px;white-space:pre-wrap;">${message}</pre>
+            </body></html>
+        `);
+    }
+
+    window.onload = initMap;
+</script>
+</body>
+</html>
